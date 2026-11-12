@@ -1,0 +1,1498 @@
+-- GlassUI Library | ملف المكتبة
+-- الأبعاد: 586 x 339 | تصميم زجاجي داكن | خانة بحث | مربعات تفعيل بيضاء
+local TweenService = game:GetService("TweenService")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+
+local Library = {}
+Library.__index = Library
+
+local Tab = {}
+Tab.__index = Tab
+
+local Section = {}
+Section.__index = Section
+
+local THEME = {
+	Bg = Color3.fromRGB(12, 12, 16),
+	Panel = Color3.fromRGB(22, 22, 30),
+	Item = Color3.fromRGB(30, 30, 40),
+	Accent = Color3.fromRGB(138, 43, 226),
+	Pink = Color3.fromRGB(255, 105, 180),
+	Text = Color3.fromRGB(235, 235, 242),
+	Sub = Color3.fromRGB(150, 150, 168),
+}
+
+local CLICK_SOUND = "rbxassetid://3868133279"
+local W, H = 586, 339
+local FONT = Enum.Font.GothamMedium
+local FONT_B = Enum.Font.GothamBold
+
+Library.Theme = THEME
+Library.ConfigFolder = "GlassUI"
+
+---------------------------------------------------------------------
+-- أدوات مساعدة
+---------------------------------------------------------------------
+local function new(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props or {}) do
+		o[k] = v
+	end
+	if parent then
+		o.Parent = parent
+	end
+	return o
+end
+
+local function corner(p, r)
+	return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, p)
+end
+
+local function stroke(p, c, th, tr)
+	return new("UIStroke", {
+		Color = c or THEME.Text,
+		Thickness = th or 1,
+		Transparency = tr or 0.8,
+	}, p)
+end
+
+local function click()
+	local s = new("Sound", { SoundId = CLICK_SOUND, Volume = 0.5 }, SoundService)
+	s:Play()
+	Debris:AddItem(s, 3)
+end
+
+local function ripple(btn, x, y)
+	local r = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(x, y),
+		Size = UDim2.fromOffset(0, 0),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.75,
+		BorderSizePixel = 0,
+		ZIndex = btn.ZIndex + 1,
+	}, btn)
+	corner(r, 999)
+	TweenService:Create(r, TweenInfo.new(0.45, Enum.EasingStyle.Quad), {
+		Size = UDim2.fromOffset(180, 180),
+		BackgroundTransparency = 1,
+	}):Play()
+	Debris:AddItem(r, 0.5)
+end
+
+-- سحب بإصبع واحد فقط (أول إصبع يلمس يتحكم بالسحب والباقي يتجاهل)
+local function makeDrag(handle, cb)
+	local active, origin
+	handle.InputBegan:Connect(function(i)
+		if active then
+			return
+		end
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			active = i
+			origin = i.Position
+			if cb.Start then
+				cb.Start()
+			end
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if not active then
+			return
+		end
+		local isMove = i == active
+			or (i.UserInputType == Enum.UserInputType.MouseMovement and active.UserInputType == Enum.UserInputType.MouseButton1)
+		if isMove and cb.Move then
+			cb.Move(i.Position - origin)
+		end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		if i == active then
+			active = nil
+			if cb.End then
+				cb.End()
+			end
+		end
+	end)
+end
+
+local function column(parent, pos, size)
+	local sf = new("ScrollingFrame", {
+		Position = pos,
+		Size = size,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		ScrollBarImageColor3 = THEME.Accent,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, parent)
+	new("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, sf)
+	new("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingRight = UDim.new(0, 4) }, sf)
+	return sf
+end
+
+local function makeRow(host, name, h)
+	local height = h or 32
+	local r = new("Frame", {
+		Size = UDim2.new(1, -6, 0, height),
+		BackgroundColor3 = THEME.Item,
+		BackgroundTransparency = 0.25,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+	}, host)
+	corner(r, 8)
+	local st = stroke(r, THEME.Text, 1, 0.9)
+	local lbl = new("TextButton", {
+		Size = UDim2.new(1, -8, 0, height),
+		Position = UDim2.fromOffset(8, 0),
+		BackgroundTransparency = 1,
+		Text = name,
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		AutoButtonColor = false,
+	}, r)
+	return r, lbl, st
+end
+
+local function hostOf(self, o)
+	if self.Container then
+		return self.Container
+	end
+	return (o.Side == "Right") and self.Right or self.Left
+end
+
+local function pulse(el)
+	el.Stroke.Color = Color3.new(1, 1, 1)
+	el.Stroke.Thickness = 2
+	el.Stroke.Transparency = 0
+	TweenService:Create(el.Stroke, TweenInfo.new(1.4), {
+		Color = THEME.Accent,
+		Thickness = 1,
+		Transparency = 0.9,
+	}):Play()
+end
+
+---------------------------------------------------------------------
+-- إنشاء النافذة
+---------------------------------------------------------------------
+function Library.new(opts)
+	opts = opts or {}
+	local self = setmetatable({
+		Flags = {},
+		Elements = {},
+		Tabs = {},
+		Visible = true,
+	}, Library)
+
+	local pg = Players.LocalPlayer:WaitForChild("PlayerGui")
+	self.Gui = new("ScreenGui", {
+		Name = "GlassUI",
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		DisplayOrder = 50,
+	}, pg)
+
+	local win = new("Frame", {
+		Name = "Window",
+		Size = UDim2.fromOffset(W, H),
+		Position = UDim2.new(0.5, -math.floor(W / 2), 0.5, -math.floor(H / 2)),
+		BackgroundColor3 = THEME.Bg,
+		BackgroundTransparency = 0.12,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+	}, self.Gui)
+	corner(win, 14)
+	stroke(win, THEME.Accent, 1.5, 0.2)
+	self.Window = win
+
+	-- الخطوط البيضاء المتحركة داخل إطار النافذة
+	local segs = {}
+	for i = 1, 3 do
+		local s = new("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = Color3.new(1, 1, 1),
+			BackgroundTransparency = 0.1,
+			BorderSizePixel = 0,
+			ZIndex = 30,
+		}, win)
+		corner(s, 2)
+		segs[i] = s
+	end
+	local SEG = 46
+	local function edgePoint(t)
+		local per = 2 * (W + H)
+		local p = (t % 1) * per
+		if p < W then
+			return p, 2, true
+		elseif p < W + H then
+			return W - 2, p - W, false
+		elseif p < 2 * W + H then
+			return W - (p - W - H), H - 2, true
+		else
+			return 2, H - (p - 2 * W - H), false
+		end
+	end
+	local t0 = 0
+	RunService.RenderStepped:Connect(function(dt)
+		t0 = (t0 + dt * 0.12) % 1
+		for i, s in ipairs(segs) do
+			local x, y, horiz = edgePoint(t0 + (i - 1) / 3)
+			s.Position = UDim2.fromOffset(x, y)
+			s.Size = horiz and UDim2.fromOffset(SEG, 2) or UDim2.fromOffset(2, SEG)
+		end
+	end)
+
+	-- الشريط العلوي: العنوان + خانة البحث بجنبه
+	local top = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundTransparency = 1,
+		ZIndex = 5,
+	}, win)
+	new("TextLabel", {
+		Size = UDim2.new(0.5, -12, 1, 0),
+		Position = UDim2.fromOffset(12, 0),
+		BackgroundTransparency = 1,
+		Text = opts.Title or "GlassUI",
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, top)
+
+	local search = new("TextBox", {
+		Name = "Search",
+		Size = UDim2.new(0, 200, 0, 24),
+		Position = UDim2.new(1, -210, 0.5, -12),
+		BackgroundColor3 = THEME.Item,
+		BackgroundTransparency = 0.2,
+		PlaceholderText = "ابحث عن زر...",
+		PlaceholderColor3 = THEME.Sub,
+		Text = "",
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ClearTextOnFocus = false,
+		ZIndex = 6,
+	}, top)
+	corner(search, 7)
+	stroke(search, THEME.Accent, 1, 0.5)
+	search:GetPropertyChangedSignal("Text"):Connect(function()
+		self:Find(search.Text)
+	end)
+
+	makeDrag(top, {
+		Start = function()
+			self._winStart = win.Position
+		end,
+		Move = function(d)
+			local p = self._winStart
+			win.Position = UDim2.new(p.X.Scale, p.X.Offset + d.X, p.Y.Scale, p.Y.Offset + d.Y)
+		end,
+	})
+
+	-- المحتوى
+	self.Content = new("Frame", {
+		Position = UDim2.fromOffset(0, 38),
+		Size = UDim2.new(1, 0, 0, 255),
+		BackgroundTransparency = 1,
+	}, win)
+
+	-- شريط التبويبات السفلي في المنتصف
+	local bar = new("Frame", {
+		Position = UDim2.new(0, 0, 1, -36),
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundTransparency = 1,
+	}, win)
+	self.TabBar = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 0),
+		Size = UDim2.new(1, -16, 1, -8),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.3,
+	}, bar)
+	corner(self.TabBar, 10)
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+	}, self.TabBar)
+
+	-- منطقة الإشعارات
+	self.NotifyHolder = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 10),
+		Size = UDim2.fromOffset(240, 400),
+		BackgroundTransparency = 1,
+	}, self.Gui)
+	new("UIListLayout", {
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, self.NotifyHolder)
+
+	return self
+end
+
+function Library:Toggle()
+	self.Visible = not self.Visible
+	self.Window.Visible = self.Visible
+end
+
+---------------------------------------------------------------------
+-- زر الفتح العائم
+---------------------------------------------------------------------
+function Library:CreateFloatingButton(o)
+	o = o or {}
+	local size = o.Size or 48
+	local btn = new("TextButton", {
+		Name = "OpenButton",
+		Size = UDim2.fromOffset(size, size),
+		Position = o.Position or UDim2.new(0.5, -math.floor(size / 2), 0, 10),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.15,
+		Text = o.Text or "S",
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 16,
+		AutoButtonColor = false,
+		ZIndex = 40,
+	}, self.Gui)
+	corner(btn, o.Shape == "Circle" and 999 or 10)
+	stroke(btn, THEME.Accent, 1.5, 0.1)
+
+	local startPos
+	local moved = false
+	makeDrag(btn, {
+		Start = function()
+			startPos = btn.Position
+			moved = false
+		end,
+		Move = function(d)
+			if o.Draggable == false then
+				return
+			end
+			if d.Magnitude > 6 then
+				moved = true
+			end
+			btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end,
+		End = function()
+			if not moved then
+				click()
+				self:Toggle()
+			end
+		end,
+	})
+	return btn
+end
+
+---------------------------------------------------------------------
+-- الإشعارات (مع شريط تقدم ينقص مع الوقت)
+---------------------------------------------------------------------
+function Library:Notify(o)
+	o = o or {}
+	local card = new("Frame", {
+		Size = UDim2.fromOffset(240, 62),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.1,
+		BorderSizePixel = 0,
+	}, self.NotifyHolder)
+	corner(card, 10)
+	stroke(card, THEME.Accent, 1, 0.3)
+	new("TextLabel", {
+		Position = UDim2.fromOffset(10, 6),
+		Size = UDim2.new(1, -20, 0, 18),
+		BackgroundTransparency = 1,
+		Text = o.Title or "تنبيه",
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, card)
+	new("TextLabel", {
+		Position = UDim2.fromOffset(10, 24),
+		Size = UDim2.new(1, -20, 0, 16),
+		BackgroundTransparency = 1,
+		Text = o.Content or "",
+		TextColor3 = THEME.Sub,
+		Font = FONT,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+	}, card)
+	local bar = new("Frame", {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 3),
+		BackgroundColor3 = THEME.Accent,
+		BorderSizePixel = 0,
+	}, card)
+	local d = o.Duration or 3
+	TweenService:Create(bar, TweenInfo.new(d, Enum.EasingStyle.Linear), {
+		Size = UDim2.new(0, 0, 0, 3),
+	}):Play()
+	task.delay(d, function()
+		TweenService:Create(card, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
+		task.wait(0.25)
+		card:Destroy()
+	end)
+end
+
+---------------------------------------------------------------------
+-- التبويبات
+---------------------------------------------------------------------
+function Library:AddTab(name)
+	local t = setmetatable({ Name = name, Window = self }, Tab)
+	t.Tab = t
+
+	t.Button = new("TextButton", {
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 26),
+		BackgroundColor3 = THEME.Item,
+		BackgroundTransparency = 0.3,
+		Text = name,
+		Font = FONT,
+		TextSize = 13,
+		TextColor3 = THEME.Sub,
+		AutoButtonColor = false,
+	}, self.TabBar)
+	new("UIPadding", {
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+	}, t.Button)
+	corner(t.Button, 7)
+
+	t.Page = new("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, self.Content)
+	t.Left = column(t.Page, UDim2.new(0, 4, 0, 0), UDim2.new(0.5, -6, 1, 0))
+	t.Right = column(t.Page, UDim2.new(0.5, 2, 0, 0), UDim2.new(0.5, -6, 1, 0))
+
+	t.Button.MouseButton1Click:Connect(function()
+		click()
+		t:Select()
+	end)
+
+	table.insert(self.Tabs, t)
+	if #self.Tabs == 1 then
+		t:Select()
+	end
+	return t
+end
+
+function Tab:Select()
+	for _, t in ipairs(self.Window.Tabs) do
+		t.Page.Visible = false
+		t.Button.BackgroundColor3 = THEME.Item
+		t.Button.TextColor3 = THEME.Sub
+	end
+	self.Page.Visible = true
+	self.Button.BackgroundColor3 = THEME.Accent
+	self.Button.TextColor3 = THEME.Text
+end
+
+-- قسم قابل للطي: يخفي/يطوي الأزرار اللي تحته فقط
+function Tab:AddSection(o)
+	o = o or {}
+	local host = (o.Side == "Right") and self.Right or self.Left
+
+	local head = new("TextButton", {
+		Size = UDim2.new(1, -6, 0, 30),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.1,
+		Text = "   " .. (o.Name or "قسم"),
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		AutoButtonColor = false,
+	}, host)
+	corner(head, 8)
+	stroke(head, THEME.Accent, 1, 0.4)
+	local arrow = new("TextLabel", {
+		Position = UDim2.new(1, -22, 0, 0),
+		Size = UDim2.fromOffset(16, 30),
+		BackgroundTransparency = 1,
+		Text = "▾",
+		TextColor3 = THEME.Sub,
+		Font = FONT_B,
+		TextSize = 14,
+	}, head)
+
+	local box = new("Frame", {
+		Size = UDim2.new(1, -6, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, host)
+	new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, box)
+
+	local open = true
+	head.MouseButton1Click:Connect(function()
+		open = not open
+		box.Visible = open
+		arrow.Text = open and "▾" or "▸"
+	end)
+
+	return setmetatable({ Tab = self, Container = box }, Section)
+end
+
+---------------------------------------------------------------------
+-- العناصر (مشتركة بين التبويب والقسم)
+---------------------------------------------------------------------
+local M = {}
+
+function M:AddButton(o)
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local r, lbl, st = makeRow(host, o.Name)
+
+	if o.Settings then
+		local gear = new("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -6, 0.5, 0),
+			Size = UDim2.fromOffset(26, 22),
+			BackgroundColor3 = THEME.Panel,
+			BackgroundTransparency = 0.2,
+			Text = "⋯",
+			TextColor3 = THEME.Text,
+			Font = FONT_B,
+			TextSize = 14,
+			AutoButtonColor = false,
+		}, r)
+		corner(gear, 6)
+		gear.MouseButton1Click:Connect(function()
+			click()
+			lib:OpenSubpage(o.Name, o.Settings)
+		end)
+		lbl.Size = UDim2.new(1, -44, 1, 0)
+	end
+
+	lbl.MouseButton1Click:Connect(function()
+		click()
+		ripple(r, r.AbsoluteSize.X / 2, r.AbsoluteSize.Y / 2)
+		if o.Callback then
+			pcall(o.Callback)
+		end
+	end)
+
+	lib:_register(o.Name, r, st, self.Tab)
+	return r
+end
+
+-- مربع تفعيل: لما يكون شغال يصير أبيض وفيه صح، والضغط على الاسم يفعّله
+function M:AddCheckbox(o)
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local r, lbl, st = makeRow(host, o.Name)
+
+	local box = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.fromOffset(18, 18),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.9,
+		BorderSizePixel = 0,
+	}, r)
+	corner(box, 4)
+	local bst = stroke(box, Color3.new(1, 1, 1), 1, 0.4)
+	local mark = new("TextLabel", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		Text = "✓",
+		TextColor3 = Color3.new(0, 0, 0),
+		Font = FONT_B,
+		TextSize = 14,
+		Visible = false,
+	}, box)
+	lbl.Size = UDim2.new(1, -40, 1, 0)
+
+	local state = false
+	local function set(v, silent)
+		state = v and true or false
+		TweenService:Create(box, TweenInfo.new(0.18), {
+			BackgroundTransparency = state and 0 or 0.9,
+		}):Play()
+		bst.Transparency = state and 0 or 0.4
+		mark.Visible = state
+		lib.Flags[o.Flag or o.Name] = state
+		if not silent and o.Callback then
+			pcall(o.Callback, state)
+		end
+	end
+
+	lbl.MouseButton1Click:Connect(function()
+		click()
+		ripple(r, r.AbsoluteSize.X / 2, r.AbsoluteSize.Y / 2)
+		set(not state)
+	end)
+
+	set(o.Default, true)
+	lib:_register(o.Name, r, st, self.Tab, function(v)
+		set(v, false)
+	end, o.Flag or o.Name)
+	return { Set = set }
+end
+
+function M:AddSlider(o)
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local min, max = o.Min or 0, o.Max or 100
+	local r, lbl, st = makeRow(host, o.Name, 44)
+	lbl.Size = UDim2.new(1, -8, 0, 22)
+	lbl.Position = UDim2.fromOffset(8, 2)
+
+	local bar = new("Frame", {
+		Position = UDim2.new(0, 10, 1, -14),
+		Size = UDim2.new(1, -20, 0, 6),
+		BackgroundColor3 = THEME.Panel,
+		BorderSizePixel = 0,
+	}, r)
+	corner(bar, 3)
+	local fill = new("Frame", {
+		Size = UDim2.new(0, 0, 1, 0),
+		BackgroundColor3 = THEME.Accent,
+		BorderSizePixel = 0,
+	}, bar)
+	corner(fill, 3)
+
+	local val = math.clamp(o.Default or min, min, max)
+	local function render(v)
+		val = math.clamp(math.floor(v + 0.5), min, max)
+		local rel = (val - min) / (max - min)
+		fill.Size = UDim2.new(rel, 0, 1, 0)
+		lbl.Text = o.Name .. ": " .. val
+		lib.Flags[o.Flag or o.Name] = val
+	end
+
+	local dragging = false
+	local function fromX(x)
+		local rel = math.clamp((x - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+		render(min + (max - min) * rel)
+		if o.Callback then
+			pcall(o.Callback, val)
+		end
+	end
+
+	bar.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			fromX(i.Position.X)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
+			fromX(i.Position.X)
+		end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+
+	render(val)
+	lib:_register(o.Name, r, st, self.Tab, function(v)
+		render(v)
+	end, o.Flag or o.Name)
+	return { Set = render }
+end
+
+function M:AddTextBox(o)
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local r, lbl, st = makeRow(host, o.Name)
+	lbl.Size = UDim2.new(0.5, 0, 1, 0)
+
+	local box = new("TextBox", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -6, 0.5, 0),
+		Size = UDim2.new(0, 150, 0, 22),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.2,
+		Text = o.Default or "",
+		PlaceholderText = o.Placeholder or "...",
+		PlaceholderColor3 = THEME.Sub,
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 12,
+		ClearTextOnFocus = false,
+	}, r)
+	corner(box, 6)
+
+	box.FocusLost:Connect(function()
+		lib.Flags[o.Flag or o.Name] = box.Text
+		if o.Callback then
+			pcall(o.Callback, box.Text)
+		end
+	end)
+
+	lib:_register(o.Name, r, st, self.Tab, function(v)
+		box.Text = tostring(v)
+	end, o.Flag or o.Name)
+	return box
+end
+
+function M:AddDropdown(o)
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local options = o.Options or {}
+	local r, lbl, st = makeRow(host, o.Name)
+	lbl.Size = UDim2.new(1, -40, 0, 32)
+
+	local arrow = new("TextLabel", {
+		Position = UDim2.new(1, -28, 0, 0),
+		Size = UDim2.fromOffset(20, 32),
+		BackgroundTransparency = 1,
+		Text = "▾",
+		TextColor3 = THEME.Sub,
+		Font = FONT_B,
+		TextSize = 14,
+	}, r)
+
+	local listArea = new("Frame", {
+		Position = UDim2.fromOffset(6, 36),
+		Size = UDim2.new(1, -12, 0, 120),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, r)
+	local search = new("TextBox", {
+		Size = UDim2.new(1, 0, 0, 24),
+		BackgroundColor3 = THEME.Bg,
+		BackgroundTransparency = 0.2,
+		PlaceholderText = "بحث...",
+		PlaceholderColor3 = THEME.Sub,
+		Text = "",
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 12,
+		ClearTextOnFocus = false,
+	}, listArea)
+	corner(search, 6)
+
+	local sf = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(0, 28),
+		Size = UDim2.new(1, 0, 1, -28),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, listArea)
+	new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
+
+	local current = o.Default
+	local open = false
+
+	local function setValue(v, silent)
+		current = v
+		lbl.Text = o.Name .. ": " .. tostring(v)
+		lib.Flags[o.Flag or o.Name] = v
+		if not silent and o.Callback then
+			pcall(o.Callback, v)
+		end
+	end
+
+	local function render(filter)
+		for _, c in ipairs(sf:GetChildren()) do
+			if c:IsA("TextButton") then
+				c:Destroy()
+			end
+		end
+		for _, opt in ipairs(options) do
+			if filter == "" or string.find(string.lower(tostring(opt)), string.lower(filter), 1, true) then
+				local b = new("TextButton", {
+					Size = UDim2.new(1, -4, 0, 24),
+					BackgroundColor3 = THEME.Panel,
+					BackgroundTransparency = 0.3,
+					Text = tostring(opt),
+					TextColor3 = THEME.Text,
+					Font = FONT,
+					TextSize = 12,
+					AutoButtonColor = false,
+				}, sf)
+				corner(b, 6)
+				b.MouseButton1Click:Connect(function()
+					click()
+					setValue(opt)
+					open = false
+					listArea.Visible = false
+					r.Size = UDim2.new(1, -6, 0, 32)
+				end)
+			end
+		end
+	end
+
+	search:GetPropertyChangedSignal("Text"):Connect(function()
+		render(search.Text)
+	end)
+
+	lbl.MouseButton1Click:Connect(function()
+		click()
+		open = not open
+		listArea.Visible = open
+		arrow.Text = open and "▴" or "▾"
+		TweenService:Create(r, TweenInfo.new(0.2), {
+			Size = UDim2.new(1, -6, 0, open and 164 or 32),
+		}):Play()
+	end)
+
+	render("")
+	if current ~= nil then
+		setValue(current, true)
+	end
+	lib:_register(o.Name, r, st, self.Tab, function(v)
+		setValue(v, true)
+	end, o.Flag or o.Name)
+	return { Set = setValue }
+end
+
+-- الزر في الأقسام والتبويبات
+Tab.AddButton = M.AddButton
+Tab.AddCheckbox = M.AddCheckbox
+Tab.AddSlider = M.AddSlider
+Tab.AddTextBox = M.AddTextBox
+Tab.AddDropdown = M.AddDropdown
+Section.AddButton = M.AddButton
+Section.AddCheckbox = M.AddCheckbox
+Section.AddSlider = M.AddSlider
+Section.AddTextBox = M.AddTextBox
+Section.AddDropdown = M.AddDropdown
+
+---------------------------------------------------------------------
+-- البحث عن زر بالاسم
+---------------------------------------------------------------------
+function Library:_register(name, row, st, tab, setter, flagKey)
+	table.insert(self.Elements, {
+		Name = tostring(name),
+		Row = row,
+		Stroke = st,
+		Tab = tab,
+		Set = setter,
+		Flag = flagKey,
+	})
+end
+
+function Library:Find(q)
+	q = string.lower(q or "")
+	if q == "" then
+		return nil
+	end
+	for _, el in ipairs(self.Elements) do
+		if string.find(string.lower(el.Name), q, 1, true) then
+			el.Tab:Select()
+			local p = el.Row.Parent
+			while p and not p:IsA("ScrollingFrame") do
+				p = p.Parent
+			end
+			if p then
+				local y = el.Row.AbsolutePosition.Y - p.AbsolutePosition.Y + p.CanvasPosition.Y - 6
+				p.CanvasPosition = Vector2.new(0, math.max(0, y))
+			end
+			pulse(el)
+			return el
+		end
+	end
+	return nil
+end
+
+---------------------------------------------------------------------
+-- حفظ وتحميل الإعدادات
+---------------------------------------------------------------------
+function Library:SaveConfig(name)
+	if not writefile then
+		return false
+	end
+	if makefolder and not (isfolder and isfolder(self.ConfigFolder)) then
+		makefolder(self.ConfigFolder)
+	end
+	writefile(self.ConfigFolder .. "/" .. (name or "default") .. ".json", HttpService:JSONEncode(self.Flags))
+	return true
+end
+
+function Library:LoadConfig(name)
+	local path = self.ConfigFolder .. "/" .. (name or "default") .. ".json"
+	if not (readfile and isfile and isfile(path)) then
+		return false
+	end
+	local data = HttpService:JSONDecode(readfile(path))
+	for _, el in ipairs(self.Elements) do
+		if el.Flag and data[el.Flag] ~= nil and el.Set then
+			el.Set(data[el.Flag])
+		end
+	end
+	return true
+end
+
+
+---------------------------------------------------------------------
+-- تعديل التسجيل: عناصر الصفحات الفرعية ما تدخل البحث
+---------------------------------------------------------------------
+function Library:_register(name, row, st, tab, setter, flagKey)
+	if self._inSub then
+		return
+	end
+	table.insert(self.Elements, {
+		Name = tostring(name),
+		Row = row,
+		Stroke = st,
+		Tab = tab,
+		Set = setter,
+		Flag = flagKey,
+	})
+end
+
+---------------------------------------------------------------------
+-- الصفحات الفرعية (تنفتح من زر الثلاث نقاط)
+---------------------------------------------------------------------
+function Library:OpenSubpage(title, builder)
+	if self._sub then
+		self._sub:Destroy()
+	end
+
+	local cur = self.Tabs[1]
+	for _, t in ipairs(self.Tabs) do
+		if t.Page.Visible then
+			cur = t
+		end
+	end
+
+	local ov = new("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = THEME.Bg,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		ZIndex = 15,
+	}, self.Window)
+	corner(ov, 14)
+	self._sub = ov
+
+	local head = new("Frame", {
+		Size = UDim2.new(1, 0, 0, 36),
+		BackgroundTransparency = 1,
+		ZIndex = 16,
+	}, ov)
+	local back = new("TextButton", {
+		Position = UDim2.fromOffset(10, 6),
+		Size = UDim2.fromOffset(74, 24),
+		BackgroundColor3 = THEME.Item,
+		BackgroundTransparency = 0.2,
+		Text = "← رجوع",
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 12,
+		AutoButtonColor = false,
+		ZIndex = 17,
+	}, head)
+	corner(back, 7)
+	new("TextLabel", {
+		Position = UDim2.fromOffset(94, 0),
+		Size = UDim2.new(1, -104, 1, 0),
+		BackgroundTransparency = 1,
+		Text = title or "",
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 17,
+	}, head)
+
+	local sc = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(8, 42),
+		Size = UDim2.new(1, -16, 1, -50),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		ScrollBarImageColor3 = THEME.Accent,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ZIndex = 16,
+	}, ov)
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sc)
+
+	back.MouseButton1Click:Connect(function()
+		click()
+		ov:Destroy()
+		self._sub = nil
+	end)
+
+	local page = setmetatable({ Tab = cur, Container = sc }, Section)
+	if builder then
+		self._inSub = true
+		local ok, err = pcall(builder, page)
+		self._inSub = false
+		if not ok then
+			warn("[GlassUI] subpage error: " .. tostring(err))
+		end
+	end
+	return page
+end
+
+---------------------------------------------------------------------
+-- نظام المفتاح (Key System)
+---------------------------------------------------------------------
+function Library:Toggle()
+	if self.Locked then
+		return
+	end
+	self.Visible = not self.Visible
+	self.Window.Visible = self.Visible
+end
+
+function Library:CreateKeyGate(o)
+	o = o or {}
+	self.Locked = true
+	self.Window.Visible = false
+
+	local gate = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(330, 200),
+		BackgroundColor3 = THEME.Bg,
+		BackgroundTransparency = 0.05,
+		BorderSizePixel = 0,
+		ZIndex = 60,
+	}, self.Gui)
+	corner(gate, 14)
+	stroke(gate, THEME.Accent, 1.5, 0.2)
+
+	new("TextLabel", {
+		Position = UDim2.fromOffset(0, 12),
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+		Text = o.Title or "التحقق من المفتاح",
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 16,
+		ZIndex = 61,
+	}, gate)
+	new("TextLabel", {
+		Position = UDim2.fromOffset(0, 36),
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1,
+		Text = o.Subtitle or "ادخل المفتاح للمتابعة",
+		TextColor3 = THEME.Sub,
+		Font = FONT,
+		TextSize = 12,
+		ZIndex = 61,
+	}, gate)
+
+	local input = new("TextBox", {
+		Position = UDim2.fromOffset(20, 66),
+		Size = UDim2.new(1, -40, 0, 32),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.2,
+		PlaceholderText = "KEY-XXXX",
+		PlaceholderColor3 = THEME.Sub,
+		Text = "",
+		TextColor3 = THEME.Text,
+		Font = FONT,
+		TextSize = 13,
+		ClearTextOnFocus = false,
+		ZIndex = 61,
+	}, gate)
+	corner(input, 8)
+
+	local function mkBtn(text, x, w, color)
+		local b = new("TextButton", {
+			Position = UDim2.fromOffset(x, 112),
+			Size = UDim2.fromOffset(w, 32),
+			BackgroundColor3 = color,
+			BackgroundTransparency = 0.1,
+			Text = text,
+			TextColor3 = THEME.Text,
+			Font = FONT_B,
+			TextSize = 13,
+			AutoButtonColor = false,
+			ZIndex = 61,
+		}, gate)
+		corner(b, 8)
+		return b
+	end
+
+	local getBtn = mkBtn("احصل على المفتاح", 20, 145, THEME.Item)
+	local checkBtn = mkBtn("تحقق", 165, 145, THEME.Accent)
+
+	getBtn.MouseButton1Click:Connect(function()
+		click()
+		if o.Link and setclipboard then
+			pcall(setclipboard, o.Link)
+			self:Notify({ Title = "تم النسخ", Content = "تم نسخ رابط المفتاح", Duration = 3 })
+		else
+			self:Notify({ Title = "الرابط", Content = tostring(o.Link or "ما فيه رابط"), Duration = 4 })
+		end
+	end)
+
+	checkBtn.MouseButton1Click:Connect(function()
+		click()
+		local t = input.Text
+		local ok = (o.Key ~= nil and t == o.Key) or (o.Validate ~= nil and o.Validate(t) == true)
+		if ok then
+			gate:Destroy()
+			self.Locked = false
+			self.Visible = true
+			self.Window.Visible = true
+			if o.OnSuccess then
+				pcall(o.OnSuccess)
+			end
+		else
+			self:Notify({ Title = "خطأ", Content = "المفتاح غير صحيح", Duration = 2.5 })
+		end
+	end)
+
+	return gate
+end
+
+---------------------------------------------------------------------
+-- منتقي الألوان (يفتح في صفحة فرعية)
+---------------------------------------------------------------------
+local function bindDrag(frame, fn)
+	local dragging = false
+	frame.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+			fn(i.Position)
+		end
+	end)
+	UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
+			fn(i.Position)
+		end
+	end)
+	UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+end
+
+function Library:BuildPicker(parent, initial, onChange)
+	local h, s, v = initial:ToHSV()
+
+	local box = new("Frame", {
+		Size = UDim2.new(1, -8, 0, 150),
+		BackgroundColor3 = Color3.fromHSV(h, 1, 1),
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+	}, parent)
+	corner(box, 8)
+	local white = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, box)
+	new("UIGradient", {
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }),
+	}, white)
+	local black = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BorderSizePixel = 0 }, box)
+	new("UIGradient", {
+		Rotation = 90,
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) }),
+	}, black)
+	local cursor = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(12, 12),
+		BackgroundTransparency = 1,
+		ZIndex = 5,
+	}, box)
+	corner(cursor, 999)
+	stroke(cursor, Color3.new(1, 1, 1), 2, 0)
+
+	local hueBar = new("Frame", {
+		Size = UDim2.new(1, -8, 0, 16),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+	}, parent)
+	corner(hueBar, 6)
+	local kps = {}
+	for i = 0, 6 do
+		table.insert(kps, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 1, 1)))
+	end
+	new("UIGradient", { Color = ColorSequence.new(kps) }, hueBar)
+	local hueCursor = new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(4, 22),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0,
+	}, hueBar)
+	corner(hueCursor, 2)
+
+	local info = new("Frame", {
+		Size = UDim2.new(1, -8, 0, 30),
+		BackgroundTransparency = 1,
+	}, parent)
+	local prev = new("Frame", {
+		Size = UDim2.fromOffset(30, 30),
+		BackgroundColor3 = initial,
+		BorderSizePixel = 0,
+	}, info)
+	corner(prev, 8)
+	local hex = new("TextLabel", {
+		Position = UDim2.fromOffset(40, 0),
+		Size = UDim2.new(1, -40, 1, 0),
+		BackgroundTransparency = 1,
+		TextColor3 = THEME.Text,
+		Font = FONT_B,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	}, info)
+
+	local function refresh()
+		local c = Color3.fromHSV(h, s, v)
+		box.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		cursor.Position = UDim2.new(s, 0, 1 - v, 0)
+		hueCursor.Position = UDim2.new(h, 0, 0.5, 0)
+		prev.BackgroundColor3 = c
+		hex.Text = string.format("#%02X%02X%02X", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+		onChange(c)
+	end
+
+	bindDrag(box, function(p)
+		s = math.clamp((p.X - box.AbsolutePosition.X) / box.AbsoluteSize.X, 0, 1)
+		v = 1 - math.clamp((p.Y - box.AbsolutePosition.Y) / box.AbsoluteSize.Y, 0, 1)
+		refresh()
+	end)
+	bindDrag(hueBar, function(p)
+		h = math.clamp((p.X - hueBar.AbsolutePosition.X) / hueBar.AbsoluteSize.X, 0, 1)
+		refresh()
+	end)
+
+	refresh()
+end
+
+function M:AddColorPicker(o)
+	o = o or {}
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local key = o.Flag or o.Name
+	local r, lbl, st = makeRow(host, o.Name)
+	lbl.Size = UDim2.new(1, -40, 1, 0)
+
+	local color = o.Default or Color3.fromRGB(138, 43, 226)
+	local prev = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.fromOffset(18, 18),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+	}, r)
+	corner(prev, 4)
+	stroke(prev, Color3.new(1, 1, 1), 1, 0.5)
+
+	local function set(c, silent)
+		color = c
+		prev.BackgroundColor3 = c
+		lib.Flags[key] = { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
+		if not silent and o.Callback then
+			pcall(o.Callback, c)
+		end
+	end
+
+	lbl.MouseButton1Click:Connect(function()
+		click()
+		lib:OpenSubpage(o.Name, function(page)
+			lib:BuildPicker(page.Container, color, function(c)
+				set(c, false)
+			end)
+		end)
+	end)
+
+	set(color, true)
+	lib:_register(o.Name, r, st, self.Tab, function(v)
+		if type(v) == "table" then
+			v = Color3.fromRGB(v[1], v[2], v[3])
+		end
+		set(v, true)
+	end, key)
+	return { Set = set }
+end
+
+---------------------------------------------------------------------
+-- الأفاتار (تطبيق سكن لاعب + إعادة تعيين + تلقائي عند الرسباون)
+---------------------------------------------------------------------
+local avatarState = { original = nil, saved = nil, connected = false }
+
+local function avatarApply(desc)
+	local char = Players.LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum or not desc then
+		return false
+	end
+	if not avatarState.original then
+		pcall(function()
+			avatarState.original = hum:GetAppliedDescription()
+		end)
+	end
+	return pcall(function()
+		hum:ApplyDescription(desc)
+	end)
+end
+
+function M:AddAvatar(o)
+	o = o or {}
+	local name = o.Name or "تخصيص الأفاتار"
+	local host, lib = hostOf(self, o), self.Tab.Window
+	local r, lbl, st = makeRow(host, name)
+	lbl.Size = UDim2.new(1, -40, 1, 0)
+	new("TextLabel", {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.fromOffset(16, 20),
+		BackgroundTransparency = 1,
+		Text = "›",
+		TextColor3 = THEME.Sub,
+		Font = FONT_B,
+		TextSize = 18,
+	}, r)
+
+	if not avatarState.connected then
+		avatarState.connected = true
+		Players.LocalPlayer.CharacterAdded:Connect(function(char)
+			if lib.Flags.AvatarAutoRespawn and avatarState.saved then
+				char:WaitForChild("Humanoid", 10)
+				task.wait(0.5)
+				avatarApply(avatarState.saved)
+			end
+		end)
+	end
+
+	lbl.MouseButton1Click:Connect(function()
+		click()
+		lib:OpenSubpage(name, function(page)
+			local input = page:AddTextBox({
+				Name = "اسم المستخدم أو ID",
+				Placeholder = "Username أو UserID",
+				Flag = "AvatarTarget",
+			})
+
+			page:AddButton({
+				Name = "تطبيق السكن",
+				Callback = function()
+					local text = (input.Text:gsub("%s", ""))
+					local id = tonumber(text)
+					if not id then
+						local ok, res = pcall(function()
+							return Players:GetUserIdFromNameAsync(text)
+						end)
+						id = ok and res or nil
+					end
+					if not id then
+						lib:Notify({ Title = "خطأ", Content = "ما لقيت اللاعب", Duration = 3 })
+						return
+					end
+					local ok, desc = pcall(function()
+						return Players:GetHumanoidDescriptionFromUserId(id)
+					end)
+					if not ok or not desc then
+						lib:Notify({ Title = "خطأ", Content = "ما قدرت أجيب السكن", Duration = 3 })
+						return
+					end
+					avatarState.saved = desc
+					avatarApply(desc)
+					lib:Notify({ Title = "تم", Content = "تم تطبيق السكن", Duration = 3 })
+				end,
+			})
+
+			page:AddButton({
+				Name = "إعادة تعيين السكن",
+				Callback = function()
+					if avatarState.original then
+						avatarApply(avatarState.original)
+					end
+					avatarState.saved = nil
+					lib:Notify({ Title = "تم", Content = "رجع السكن الأصلي", Duration = 3 })
+				end,
+			})
+
+			page:AddCheckbox({
+				Name = "تطبيق تلقائي عند الرسباون",
+				Flag = "AvatarAutoRespawn",
+				Default = false,
+			})
+		end)
+	end)
+
+	lib:_register(name, r, st, self.Tab)
+	return r
+end
+
+Tab.AddColorPicker = M.AddColorPicker
+Tab.AddAvatar = M.AddAvatar
+Section.AddColorPicker = M.AddColorPicker
+Section.AddAvatar = M.AddAvatar
+
+---------------------------------------------------------------------
+-- شريط الصور فوق التبويبات (كل صورة تنضاف جنب اللي قبلها)
+---------------------------------------------------------------------
+function Library:CreateImageBar()
+	if self.ImageBar then
+		return self.ImageBar
+	end
+	self.Content.Size = UDim2.new(1, 0, 0, 203)
+
+	local bar = new("ScrollingFrame", {
+		Position = UDim2.fromOffset(8, 245),
+		Size = UDim2.new(1, -16, 0, 44),
+		BackgroundColor3 = THEME.Panel,
+		BackgroundTransparency = 0.3,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 2,
+		ScrollBarImageColor3 = THEME.Accent,
+		ScrollingDirection = Enum.ScrollingDirection.X,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.X,
+	}, self.Window)
+	corner(bar, 10)
+	stroke(bar, THEME.Accent, 1, 0.5)
+	new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}, bar)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, bar)
+
+	self.ImageBar = bar
+	self._images = {}
+	return bar
+end
+
+function Library:AddImage(o)
+	o = o or {}
+	local bar = self:CreateImageBar()
+	local id = o.Image
+	if type(id) == "number" then
+		id = "rbxassetid://" .. id
+	end
+
+	local img = new("ImageButton", {
+		Size = UDim2.fromOffset(36, 36),
+		BackgroundColor3 = THEME.Item,
+		BorderSizePixel = 0,
+		Image = id or "",
+		ScaleType = Enum.ScaleType.Crop,
+		AutoButtonColor = false,
+		LayoutOrder = #self._images + 1,
+	}, bar)
+	corner(img, 8)
+	local glow = stroke(img, Color3.new(1, 1, 1), 2, 1)
+
+	local on = false
+	img.MouseButton1Click:Connect(function()
+		click()
+		on = not on
+		TweenService:Create(glow, TweenInfo.new(0.2), {
+			Transparency = on and 0 or 1,
+		}):Play()
+		if o.Callback then
+			pcall(o.Callback, on, img)
+		end
+	end)
+
+	table.insert(self._images, img)
+	return img
+end
+
+return Library
